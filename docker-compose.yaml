@@ -93,8 +93,11 @@ services:
       context: .
       dockerfile: spark/job/Dockerfile
     container_name: spark-job
+    depends_on:
+      - postgres_loader
+      - spark-master
+      - spark-worker
     volumes:
-      - ./:/app:ro
       - ./jars:/opt/jars:ro
     environment:
       # PSQL

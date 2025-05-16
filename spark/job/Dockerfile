@@ -13,9 +13,12 @@ WORKDIR /app
 
 RUN echo "📂 Перед COPY:" && pwd && ls -la
 
-RUN mkdir -p ETL/spark_jobs/
-COPY spark/job_scripts/test_connection.py ETL/spark_jobs/
+# Создаем структуру директорий
+RUN mkdir -p /app/ETL/spark_jobs
 
-RUN echo "📂 После COPY:" && tree /app && ls -la ETL/spark_jobs/
+# Копируем файл в нужную директорию
+COPY spark/job_scripts/test_connection.py /app/ETL/spark_jobs/
 
-ENTRYPOINT ["spark-submit", "--master", "spark://spark-master:7077", "--deploy-mode", "client", "--jars", "/opt/bitnami/spark/jars/clickhouse-jdbc-0.8.3-all.jar,/opt/bitnami/spark/jars/postgresql-42.7.3.jar", "ETL/spark_jobs/test_connection.py"]
+RUN echo "📂 После COPY:" && tree /app
+
+ENTRYPOINT ["spark-submit", "--master", "spark://spark-master:7077", "--deploy-mode", "client", "--jars", "/opt/bitnami/spark/jars/clickhouse-jdbc-0.8.3-all.jar,/opt/bitnami/spark/jars/postgresql-42.7.3.jar", "/app/ETL/spark_jobs/test_connection.py"]
