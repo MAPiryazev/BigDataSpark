@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, when, lit, concat, expr
+from pyspark.sql.functions import col, when, lit, concat, expr, to_date
 import os
 
 # PostgreSQL connection parameters
@@ -157,7 +157,12 @@ dim_suppliers = mock_data.join(cities_df, mock_data.supplier_city == cities_df.c
         'supplier_address',
         'city_id',
         'country_id'
-    ).distinct()
+    ).distinct() \
+    .withColumnRenamed('supplier_name', 'name') \
+    .withColumnRenamed('supplier_contact', 'contact') \
+    .withColumnRenamed('supplier_email', 'email') \
+    .withColumnRenamed('supplier_phone', 'phone') \
+    .withColumnRenamed('supplier_address', 'address')
 dim_suppliers.write.jdbc(
     url=pg_url,
     table='dim_suppliers',
@@ -174,7 +179,12 @@ dim_customers = mock_data.join(countries_df, mock_data.customer_country == count
         'customer_email',
         'country_id',
         'customer_postal_code'
-    ).distinct()
+    ).distinct() \
+    .withColumnRenamed('customer_first_name', 'first_name') \
+    .withColumnRenamed('customer_last_name', 'last_name') \
+    .withColumnRenamed('customer_age', 'age') \
+    .withColumnRenamed('customer_email', 'email') \
+    .withColumnRenamed('customer_postal_code', 'postal_code')
 dim_customers.write.jdbc(
     url=pg_url,
     table='dim_customers',
@@ -190,7 +200,12 @@ dim_sellers = mock_data.join(countries_df, mock_data.seller_country == countries
         'seller_email',
         'country_id',
         'seller_postal_code'
-    ).distinct()
+    ).distinct() \
+    .withColumnRenamed('seller_first_name', 'first_name') \
+    .withColumnRenamed('seller_last_name', 'last_name') \
+    .withColumnRenamed('seller_email', 'seller_email') \
+    .withColumnRenamed('country_id', 'seller_country_id') \
+    .withColumnRenamed('seller_postal_code', 'postal_code')
 dim_sellers.write.jdbc(
     url=pg_url,
     table='dim_sellers',
@@ -210,7 +225,11 @@ dim_stores = mock_data.join(cities_df, mock_data.store_city == cities_df.city_na
         'country_id',
         'store_phone',
         'store_email'
-    ).distinct()
+    ).distinct() \
+    .withColumnRenamed('store_name', 'name') \
+    .withColumnRenamed('store_location', 'location') \
+    .withColumnRenamed('store_phone', 'phone') \
+    .withColumnRenamed('store_email', 'email')
 dim_stores.write.jdbc(
     url=pg_url,
     table='dim_stores',
@@ -228,16 +247,25 @@ dim_products = mock_data.join(product_categories_df, mock_data.product_category 
         'product_price',
         'product_quantity',
         'product_weight',
-        'product_color_id',
+        product_colors_df.product_color_id.alias('color_id'),
         'product_size',
-        'product_brand_id',
+        product_brands_df.product_brand_id.alias('brand_id'),
         'product_material',
         'product_description',
         'product_rating',
         'product_reviews',
-        'product_release_date',
-        'product_expiry_date'
-    ).distinct()
+        to_date('product_release_date').alias('release_date'),
+        to_date('product_expiry_date').alias('expiry_date')
+    ).distinct() \
+    .withColumnRenamed('product_name', 'name') \
+    .withColumnRenamed('product_price', 'price') \
+    .withColumnRenamed('product_quantity', 'quantity') \
+    .withColumnRenamed('product_weight', 'weight') \
+    .withColumnRenamed('product_size', 'size') \
+    .withColumnRenamed('product_material', 'material') \
+    .withColumnRenamed('product_description', 'description') \
+    .withColumnRenamed('product_rating', 'rating') \
+    .withColumnRenamed('product_reviews', 'reviews')
 dim_products.write.jdbc(
     url=pg_url,
     table='dim_products',
@@ -254,26 +282,106 @@ dim_suppliers_df = spark.read.jdbc(pg_url, 'dim_suppliers', properties=pg_props)
 dim_pets_df = spark.read.jdbc(pg_url, 'dim_pets', properties=pg_props)
 
 # 15. Insert into fact_sales
-fact_sales = mock_data.join(dim_customers_df, mock_data.customer_email == dim_customers_df.email) \
-    .join(dim_sellers_df, mock_data.seller_email == dim_sellers_df.seller_email) \
-    .join(dim_products_df, (mock_data.product_name == dim_products_df.name) & 
-          (mock_data.product_release_date == dim_products_df.release_date)) \
-    .join(dim_stores_df, (mock_data.store_name == dim_stores_df.name) & 
-          (mock_data.store_email == dim_stores_df.email)) \
-    .join(dim_suppliers_df, mock_data.supplier_email == dim_suppliers_df.email) \
-    .join(dim_pets_df, (mock_data.customer_pet_name == dim_pets_df.pet_name) & 
-          (mock_data.customer_pet_breed == dim_pets_df.pet_breed), 'left') \
-    .select(
-        'customer_id',
-        'seller_id',
-        'product_id',
-        'store_id',
-        'supplier_id',
-        'pet_id',
-        'sale_date',
-        'sale_quantity',
-        'sale_total_price'
-    )
+print("\nПроверка данных перед джоинами:")
+print("Количество строк в mock_data:", mock_data.count())
+print("Количество строк в dim_products_df:", dim_products_df.count())
+print("Количество строк в dim_stores_df:", dim_stores_df.count())
+print("Количество строк в dim_suppliers_df:", dim_suppliers_df.count())
+
+# Проверяем уникальные значения
+print("\nУникальные значения в mock_data:")
+mock_data.select('product_name').distinct().show(5)
+mock_data.select('product_release_date').distinct().show(5)
+
+print("\nУникальные значения в dim_products_df:")
+dim_products_df.select('name').distinct().show(5)
+dim_products_df.select('release_date').distinct().show(5)
+
+fact_sales = mock_data.join(dim_customers_df, mock_data.customer_email == dim_customers_df.email)
+print(f"\nAfter customers join: {fact_sales.count()}")
+
+fact_sales = fact_sales.join(dim_sellers_df, mock_data.seller_email == dim_sellers_df.seller_email)
+print(f"After sellers join: {fact_sales.count()}")
+
+# Преобразуем даты в один формат
+fact_sales = fact_sales.withColumn('product_release_date', to_date('product_release_date'))
+dim_products_df = dim_products_df.withColumn('release_date', to_date('release_date'))
+
+# Проверяем данные перед джоином с продуктами
+print("\nПроверка данных перед джоином с продуктами:")
+print("Sample from fact_sales:")
+fact_sales.select('product_name', 'product_release_date').show(5)
+print("\nSample from dim_products_df:")
+dim_products_df.select('name', 'release_date').show(5)
+
+# Джоин с продуктами
+fact_sales = fact_sales.join(
+    dim_products_df,
+    (fact_sales.product_name == dim_products_df.name) & 
+    (fact_sales.product_release_date == dim_products_df.release_date)
+)
+print(f"After products join: {fact_sales.count()}")
+
+# Проверяем данные перед джоином со stores
+print("\nПроверка данных перед джоином со stores:")
+print("Sample from fact_sales:")
+fact_sales.select('store_name', 'store_email').show(5)
+print("\nSample from dim_stores_df:")
+dim_stores_df.select('name', 'email').show(5)
+
+# Джоин со stores
+fact_sales = fact_sales.join(
+    dim_stores_df,
+    (fact_sales.store_name == dim_stores_df.name) & 
+    (fact_sales.store_email == dim_stores_df.email)
+)
+print(f"After stores join: {fact_sales.count()}")
+
+# Проверяем данные перед джоином с suppliers
+print("\nПроверка данных перед джоином с suppliers:")
+print("Sample from fact_sales:")
+fact_sales.select('supplier_email').show(5)
+print("\nSample from dim_suppliers_df:")
+dim_suppliers_df.select('email').show(5)
+
+# Джоин с suppliers
+fact_sales = fact_sales.join(
+    dim_suppliers_df,
+    fact_sales.supplier_email == dim_suppliers_df.email
+)
+print(f"After suppliers join: {fact_sales.count()}")
+
+# Проверяем данные перед джоином с pets
+print("\nПроверка данных перед джоином с pets:")
+print("Sample from fact_sales:")
+fact_sales.select('customer_pet_name', 'customer_pet_breed').show(5)
+print("\nSample from dim_pets_df:")
+dim_pets_df.select('pet_name', 'pet_breed').show(5)
+
+# Джоин с pets
+fact_sales = fact_sales.join(
+    dim_pets_df,
+    (fact_sales.customer_pet_name == dim_pets_df.pet_name) & 
+    (fact_sales.customer_pet_breed == dim_pets_df.pet_breed),
+    'left'
+)
+print(f"After pets join: {fact_sales.count()}")
+
+# Выбираем финальные колонки
+fact_sales = fact_sales.select(
+    dim_customers_df.customer_id,
+    dim_sellers_df.seller_id,
+    dim_products_df.product_id,
+    dim_stores_df.store_id,
+    dim_suppliers_df.supplier_id,
+    dim_pets_df.pet_id,
+    to_date('sale_date').alias('sell_date'),
+    'sale_quantity',
+    'sale_total_price'
+)
+print(f"Final fact_sales count: {fact_sales.count()}")
+
+# Записываем в базу данных
 fact_sales.write.jdbc(
     url=pg_url,
     table='fact_sales',
@@ -281,4 +389,9 @@ fact_sales.write.jdbc(
     properties=pg_props
 )
 
+# Ждем завершения всех операций
+spark.sparkContext._jsc.sc().getExecutorMemoryStatus()
+spark.sparkContext._jsc.sc().getExecutorMemoryStatus()
+
+# Останавливаем Spark только после завершения всех операций
 spark.stop()
