@@ -1,7 +1,10 @@
 FROM bitnami/spark:3.5
 USER root
 
-RUN apt-get update && apt-get install -y curl tree
+RUN apt-get update && apt-get install -y curl tree python3-pip
+
+# Устанавливаем psycopg2
+RUN pip3 install psycopg2-binary
 
 # Скачиваем JDBC драйверы
 RUN curl -L -o /opt/bitnami/spark/jars/postgresql-42.7.3.jar \
