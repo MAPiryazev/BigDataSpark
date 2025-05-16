@@ -1,0 +1,123 @@
+services:
+  postgres_database:
+    image: postgres:16.0
+    container_name: postgres
+    environment:
+      POSTGRES_USER: postgres_user
+      POSTGRES_PASSWORD: postgres_pass
+      POSTGRES_DB: postgres_db
+    ports:
+      - '28546:5432'
+    volumes:
+      - postgres-storage:/var/lib/postgresql/data
+    networks:
+      - common
+
+  clickhouse_database:
+    image: clickhouse/clickhouse-server:24.3.6
+    container_name: clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    ports:
+      - '9100:9000'   # native protocol
+      - '8124:8123'   # HTTP
+    volumes:
+      - warehouse_data:/var/lib/clickhouse
+      - ./init_clickhouse/init.sh:/docker-entrypoint-initdb.d/init.sh:ro  
+    networks:
+      - common
+
+  postgres_loader:
+    build:
+      context: .
+      dockerfile: ./init_postgres/Dockerfile
+    depends_on:
+      - postgres_database
+    environment:
+      PG_HOST: postgres_database
+      PG_PORT: 5432
+      PG_DATABASE: postgres_db
+      PG_USER: postgres_user
+      PG_PASSWORD: postgres_pass
+    volumes:
+      - ./source_data:/source_data:ro
+    networks:
+      - common
+
+  spark-master:
+    build:
+      context: .
+      dockerfile: spark/Dockerfile
+    image: custom-spark:3.5
+    container_name: spark-master
+    command: ["/opt/bitnami/spark/sbin/start-master.sh"]
+    environment:
+      - HADOOP_USER_NAME=spark
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_WEBUI_HOST=0.0.0.0
+      - SPARK_JARS_IVY=/tmp/.ivy2   # директория Ivy
+    ports:
+      - '8080:8080'
+      - '7077:7077'
+    volumes:
+      - ./:/app:ro
+      - ./jars:/opt/jars:ro
+      - spark-ivy:/tmp/.ivy2
+    networks:
+      - common
+
+  spark-worker:
+    build:
+      context: .
+      dockerfile: spark/Dockerfile
+    container_name: spark-worker
+    command: ["/opt/bitnami/spark/sbin/start-worker.sh", "spark://spark-master:7077"]
+    environment:
+      - HADOOP_USER_NAME=spark
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_NO_DAEMONIZE=yes
+    depends_on:
+      - spark-master
+    volumes:
+      - ./:/app:ro
+      - ./jars:/opt/jars:ro
+    networks:
+      - common
+
+  spark-job:
+    build:
+      context: .
+      dockerfile: spark/job/Dockerfile
+    container_name: spark-job
+    volumes:
+      - ./:/app:ro
+      - ./jars:/opt/jars:ro
+    environment:
+      # PSQL
+      PG_DATABASE: postgres_db
+      PG_HOST: postgres_database
+      PG_PORT: 5432
+      PG_USER: ${PG_USER:-postgres_user}
+      PG_PASSWORD: ${PG_PASSWORD:-postgres_pass}
+      # CH
+      CH_HOST: clickhouse_database
+      CH_PORT: 8123
+      CH_DATABASE: analytics
+      CH_DRIVER: com.clickhouse.jdbc.ClickHouseDriver
+      # Additional JARs for Spark
+      SPARK_JARS: /opt/bitnami/spark/jars/clickhouse-jdbc-0.8.3-all.jar,/opt/bitnami/spark/jars/postgresql-42.7.3.jar
+    networks:
+      - common
+
+volumes:
+  postgres-storage:
+  warehouse_data:
+  spark-ivy:  # Define the spark-ivy volume
+
+networks:
+  common:
+    driver: bridge
