@@ -19,9 +19,18 @@ RUN echo "📂 Перед COPY:" && pwd && ls -la
 # Создаем структуру директорий
 RUN mkdir -p /app/ETL/spark_jobs
 
-# Копируем файл в нужную директорию
+# Копируем только файл test_connection.py
 COPY spark/job_scripts/test_connection.py /app/ETL/spark_jobs/
 
 RUN echo "📂 После COPY:" && tree /app
 
-ENTRYPOINT ["spark-submit", "--master", "spark://spark-master:7077", "--deploy-mode", "client", "--jars", "/opt/bitnami/spark/jars/clickhouse-jdbc-0.8.3-all.jar,/opt/bitnami/spark/jars/postgresql-42.7.3.jar", "/app/ETL/spark_jobs/test_connection.py"]
+# Создаем скрипт для запуска джобы
+RUN printf '#!/bin/bash\n\
+echo "Starting test_connection.py..."\n\
+spark-submit --master spark://spark-master:7077 --deploy-mode client \
+  --jars /opt/bitnami/spark/jars/clickhouse-jdbc-0.8.3-all.jar,/opt/bitnami/spark/jars/postgresql-42.7.3.jar \
+  /app/ETL/spark_jobs/test_connection.py\n' > /app/ETL/spark_jobs/run_job.sh
+
+RUN chmod +x /app/ETL/spark_jobs/run_job.sh
+
+ENTRYPOINT ["/bin/bash", "/app/ETL/spark_jobs/run_job.sh"]

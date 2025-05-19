@@ -15,19 +15,22 @@ services:
 
   clickhouse_database:
     image: clickhouse/clickhouse-server:24.3.6
-    container_name: clickhouse
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
+    container_name: clickhouse-server
     ports:
-      - '9100:9000'   # native protocol
-      - '8124:8123'   # HTTP
+      - '9000:9000'   # native binary protocol (не нужен JDBC)
+      - '8123:8123'   # ✅ HTTP protocol для JDBC
     volumes:
       - warehouse_data:/var/lib/clickhouse
-      - ./init_clickhouse/init.sh:/docker-entrypoint-initdb.d/init.sh:ro  
+      - ./init_clickhouse/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' --host localhost --port 9000"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     networks:
       - common
+
 
   postgres_loader:
     build:
@@ -88,11 +91,11 @@ services:
     networks:
       - common
 
-  spark-job:
+  spark-job-test-connection:
     build:
       context: .
       dockerfile: spark/job/Dockerfile
-    container_name: spark-job
+    container_name: spark-job-test-connection
     depends_on:
       - postgres_loader
       - spark-master
@@ -100,19 +103,61 @@ services:
     volumes:
       - ./jars:/opt/jars:ro
     environment:
-      # PSQL
       PG_DATABASE: postgres_db
       PG_HOST: postgres_database
       PG_PORT: 5432
       PG_USER: ${PG_USER:-postgres_user}
       PG_PASSWORD: ${PG_PASSWORD:-postgres_pass}
-      # CH
+      
       CH_HOST: clickhouse_database
       CH_PORT: 8123
       CH_DATABASE: analytics
+      CH_USER: default
+      CH_PASSWORD: ""
       CH_DRIVER: com.clickhouse.jdbc.ClickHouseDriver
-      # Additional JARs for Spark
+
       SPARK_JARS: /opt/bitnami/spark/jars/clickhouse-jdbc-0.8.3-all.jar,/opt/bitnami/spark/jars/postgresql-42.7.3.jar
+    healthcheck:
+      test: ["CMD", "ps", "aux", "|", "grep", "spark-submit"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - common
+
+  spark-job-populate-analytics:
+    build:
+      context: .
+      dockerfile: spark/job/Dockerfile.populate_analytics
+    container_name: spark-job-populate-analytics
+    depends_on:
+      spark-job-test-connection:
+        condition: service_completed_successfully
+      spark-master:
+        condition: service_started
+      spark-worker:
+        condition: service_started
+      clickhouse_database:
+        condition: service_started
+    volumes:
+      - ./jars:/opt/jars:ro
+    environment:
+      PG_DATABASE: postgres_db
+      PG_HOST: postgres_database
+      PG_PORT: 5432
+      PG_USER: ${PG_USER:-postgres_user}
+      PG_PASSWORD: ${PG_PASSWORD:-postgres_pass}
+      
+      CH_HOST: clickhouse_database
+      CH_PORT: 8123
+      CH_DATABASE: analytics
+      CH_USER: default
+      CH_PASSWORD: ""
+      CH_DRIVER: com.clickhouse.jdbc.ClickHouseDriver
+
+      SPARK_JARS: /opt/bitnami/spark/jars/clickhouse-jdbc-0.8.3-all.jar,/opt/bitnami/spark/jars/postgresql-42.7.3.jar
+
     networks:
       - common
 
