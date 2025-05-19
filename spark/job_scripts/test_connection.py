@@ -282,24 +282,39 @@ dim_suppliers_df = spark.read.jdbc(pg_url, 'dim_suppliers', properties=pg_props)
 dim_pets_df = spark.read.jdbc(pg_url, 'dim_pets', properties=pg_props)
 
 # 15. Insert into fact_sales
+print("Starting fact_sales creation...")
+print(f"Mock data count: {mock_data.count()}")
+
 fact_sales = mock_data \
-    .join(dim_customers_df, mock_data.id == dim_customers_df.customer_id) \
-    .join(dim_sellers_df, mock_data.id == dim_sellers_df.seller_id) \
-    .join(dim_products_df, mock_data.id == dim_products_df.product_id) \
-    .join(dim_stores_df, mock_data.id == dim_stores_df.store_id) \
-    .join(dim_suppliers_df, mock_data.id == dim_suppliers_df.supplier_id) \
-    .join(dim_pets_df, mock_data.id == dim_pets_df.pet_id, 'left') \
-    .select(
-        col("customer_id"),
-        col("seller_id"),
-        col("product_id"),
-        col("store_id"),
-        col("supplier_id"),
-        col("pet_id"),
-        to_date("sale_date").alias("sell_date"),
-        col("sale_quantity"),
-        col("sale_total_price")
-    ).distinct()
+    .join(dim_customers_df, mock_data.sale_customer_id == dim_customers_df.customer_id) \
+    .join(dim_sellers_df, mock_data.sale_seller_id == dim_sellers_df.seller_id) \
+    .join(dim_products_df, mock_data.sale_product_id == dim_products_df.product_id) \
+    .join(dim_stores_df, 
+          (mock_data.store_name == dim_stores_df.name) & 
+          (mock_data.store_email == dim_stores_df.email)) \
+    .join(dim_suppliers_df, mock_data.supplier_email == dim_suppliers_df.email) \
+    .join(dim_pets_df, 
+          (mock_data.customer_pet_name == dim_pets_df.pet_name) & 
+          (mock_data.customer_pet_breed == dim_pets_df.pet_breed), 
+          'left')
+
+print("\nAfter all joins:")
+fact_sales.show(5)
+
+fact_sales = fact_sales.select(
+    col("customer_id"),
+    col("seller_id"),
+    col("product_id"),
+    col("store_id"),
+    col("supplier_id"),
+    col("pet_id"),
+    to_date(col("sale_date"), "M/d/yyyy").alias("sell_date"),
+    col("sale_quantity"),
+    col("sale_total_price")
+).distinct()
+
+print("\nFinal fact_sales before writing:")
+fact_sales.show(5)
 
 # Записываем в базу данных
 fact_sales.write.jdbc(
