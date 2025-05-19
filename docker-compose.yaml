@@ -109,14 +109,7 @@ services:
       PG_USER: ${PG_USER:-postgres_user}
       PG_PASSWORD: ${PG_PASSWORD:-postgres_pass}
       
-      CH_HOST: clickhouse_database
-      CH_PORT: 8123
-      CH_DATABASE: analytics
-      CH_USER: default
-      CH_PASSWORD: ""
-      CH_DRIVER: com.clickhouse.jdbc.ClickHouseDriver
-
-      SPARK_JARS: /opt/bitnami/spark/jars/clickhouse-jdbc-0.8.3-all.jar,/opt/bitnami/spark/jars/postgresql-42.7.3.jar
+      SPARK_JARS: /opt/jars/clickhouse-jdbc-0.8.3-all.jar,/opt/jars/postgresql-42.7.3.jar
     healthcheck:
       test: ["CMD", "ps", "aux", "|", "grep", "spark-submit"]
       interval: 5s
@@ -149,15 +142,14 @@ services:
       PG_USER: ${PG_USER:-postgres_user}
       PG_PASSWORD: ${PG_PASSWORD:-postgres_pass}
       
-      CH_HOST: clickhouse_database
+      CH_HOST: clickhouse-server
       CH_PORT: 8123
       CH_DATABASE: analytics
       CH_USER: default
       CH_PASSWORD: ""
       CH_DRIVER: com.clickhouse.jdbc.ClickHouseDriver
 
-      SPARK_JARS: /opt/bitnami/spark/jars/clickhouse-jdbc-0.8.3-all.jar,/opt/bitnami/spark/jars/postgresql-42.7.3.jar
-
+      SPARK_JARS: /opt/jars/clickhouse-jdbc-0.4.6.jar,/opt/jars/postgresql-42.6.0.jar
     networks:
       - common
 

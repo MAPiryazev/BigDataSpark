@@ -6,11 +6,9 @@ RUN apt-get update && apt-get install -y curl tree python3-pip
 # Устанавливаем psycopg2
 RUN pip3 install psycopg2-binary
 
-# Скачиваем JDBC драйверы
-RUN curl -L -o /opt/bitnami/spark/jars/postgresql-42.7.3.jar \
-      https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.3/postgresql-42.7.3.jar \
- && curl -L -o /opt/bitnami/spark/jars/clickhouse-jdbc-0.8.3-all.jar \
-      https://repo1.maven.org/maven2/com/clickhouse/clickhouse-jdbc/0.8.3/clickhouse-jdbc-0.8.3-all.jar
+# Копируем JDBC драйверы из локальной папки jars
+COPY jars/postgresql-42.6.0.jar /opt/bitnami/spark/jars/
+COPY jars/clickhouse-jdbc-0.4.6.jar /opt/bitnami/spark/jars/
 
 WORKDIR /app
 
@@ -22,9 +20,15 @@ COPY spark/job_scripts/populate_analytics.py /app/ETL/spark_jobs/
 
 # Создаем скрипт для запуска джобы
 RUN printf '#!/bin/bash\n\
+echo "Waiting for ClickHouse to be ready..."\n\
+sleep 10\n\
+\n\
+echo "Checking if analytics database exists..."\n\
+curl -X POST "http://clickhouse_database:8123/?query=CREATE+DATABASE+IF+NOT+EXISTS+analytics"\n\
+\n\
 echo "Starting populate_analytics.py..."\n\
 spark-submit --master spark://spark-master:7077 --deploy-mode client \
-  --jars /opt/bitnami/spark/jars/clickhouse-jdbc-0.8.3-all.jar,/opt/bitnami/spark/jars/postgresql-42.7.3.jar \
+  --jars /opt/bitnami/spark/jars/clickhouse-jdbc-0.4.6.jar,/opt/bitnami/spark/jars/postgresql-42.6.0.jar \
   /app/ETL/spark_jobs/populate_analytics.py\n' > /app/ETL/spark_jobs/run_job.sh
 
 RUN chmod +x /app/ETL/spark_jobs/run_job.sh
