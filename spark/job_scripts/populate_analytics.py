@@ -71,6 +71,28 @@ print(f"dim_stores: {dim_stores.count()}")
 print(f"dim_suppliers: {dim_suppliers.count()}")
 print(f"dim_countries: {dim_countries.count()}")
 
+# Проверяем количество NULL значений в ключевых полях
+print("\n=== NULL value counts in fact_sales ===")
+print(f"customer_id NULLs: {fact_sales.filter(col('customer_id').isNull()).count()}")
+print(f"product_id NULLs: {fact_sales.filter(col('product_id').isNull()).count()}")
+print(f"store_id NULLs: {fact_sales.filter(col('store_id').isNull()).count()}")
+print(f"supplier_id NULLs: {fact_sales.filter(col('supplier_id').isNull()).count()}")
+print(f"sell_date NULLs: {fact_sales.filter(col('sell_date').isNull()).count()}")
+
+# Проверяем количество записей после каждого JOIN
+print("\n=== Record counts after joins ===")
+sales_by_product_joined = fact_sales.join(dim_products, fact_sales.product_id == dim_products.product_id, 'left')
+print(f"After joining products: {sales_by_product_joined.count()}")
+
+sales_by_customer_joined = fact_sales.join(dim_customers, fact_sales.customer_id == dim_customers.customer_id, 'left')
+print(f"After joining customers: {sales_by_customer_joined.count()}")
+
+sales_by_store_joined = fact_sales.join(dim_stores, fact_sales.store_id == dim_stores.store_id, 'left')
+print(f"After joining stores: {sales_by_store_joined.count()}")
+
+sales_by_supplier_joined = fact_sales.join(dim_suppliers, fact_sales.supplier_id == dim_suppliers.supplier_id, 'left')
+print(f"After joining suppliers: {sales_by_supplier_joined.count()}")
+
 # Заполняем NULL даты случайными датами из 2021 года
 start_date = datetime(2021, 1, 1)
 end_date = datetime(2021, 12, 31)
@@ -95,39 +117,65 @@ fact_sales.show(5)
 print("Debug: Checking fact_sales schema...")
 fact_sales.printSchema()
 
-# Проверяем количество записей
-print("Debug: Checking record counts...")
-print(f"fact_sales count: {fact_sales.count()}")
-print(f"dim_products count: {dim_products.count()}")
-print(f"dim_customers count: {dim_customers.count()}")
-print(f"dim_stores count: {dim_stores.count()}")
-print(f"dim_suppliers count: {dim_suppliers.count()}")
-
 # 1. Витрина продаж по продуктам
 print("\nProcessing sales_by_product...")
-sales_by_product = (
-    fact_sales
-    .join(dim_products, fact_sales.product_id == dim_products.product_id, 'left')
-    .join(dim_product_categories, dim_products.category_id == dim_product_categories.category_id, 'left')
-    .groupBy(
-        dim_products.product_id,
-        coalesce(dim_products.name, lit('Unknown')).alias('product_name'),
-        coalesce(dim_product_categories.category, lit('Unknown')).alias('category')
+
+# Создаем промежуточные таблицы
+product_sales = fact_sales.join(dim_products, fact_sales.product_id == dim_products.product_id, 'left')\
+    .select(
+        fact_sales.product_id,
+        dim_products.name.alias('product_name'),
+        dim_products.category_id,
+        fact_sales.sale_total_price,
+        fact_sales.sale_quantity,
+        dim_products.rating,
+        dim_products.reviews
     )
-    .agg(
-        coalesce(sum('sale_total_price'), lit(0)).alias('total_revenue'),
-        coalesce(sum('sale_quantity'), lit(0)).alias('total_quantity'),
-        coalesce(avg('rating'), lit(0)).alias('avg_rating'),
-        coalesce(sum('reviews'), lit(0)).alias('review_count'),
-        count('*').alias('total_orders'),
-        coalesce(avg('sale_total_price'), lit(0)).alias('avg_order_value')
-    )
-    .withColumn('popularity_rank', rank().over(Window.partitionBy('category').orderBy(desc('total_quantity'))))
+
+category_info = dim_product_categories.select(
+    col('category_id'),
+    col('category')
 )
+
+# Агрегируем данные по продуктам
+product_metrics = product_sales.groupBy('product_id', 'product_name', 'category_id')\
+    .agg(
+        sum('sale_total_price').alias('total_revenue'),
+        sum('sale_quantity').alias('total_quantity'),
+        avg('rating').alias('avg_rating'),
+        sum('reviews').alias('review_count'),
+        count('*').alias('total_orders'),
+        avg('sale_total_price').alias('avg_order_value')
+    )
+
+# Добавляем категории и ранжирование
+sales_by_product = product_metrics.join(category_info, 'category_id', 'left')\
+    .select(
+        col('product_id'),
+        coalesce(col('product_name'), lit('Unknown')).alias('product_name'),
+        coalesce(col('category'), lit('Unknown')).alias('category'),
+        coalesce(col('total_revenue'), lit(0)).alias('total_revenue'),
+        coalesce(col('total_quantity'), lit(0)).alias('total_quantity'),
+        coalesce(col('avg_rating'), lit(0)).alias('avg_rating'),
+        coalesce(col('review_count'), lit(0)).alias('review_count'),
+        coalesce(col('total_orders'), lit(0)).alias('total_orders'),
+        coalesce(col('avg_order_value'), lit(0)).alias('avg_order_value')
+    )\
+    .withColumn('popularity_rank', 
+        rank().over(Window.partitionBy('category').orderBy(desc('total_quantity')))
+    )
 
 print(f"sales_by_product count: {sales_by_product.count()}")
 print("Debug: sales_by_product sample...")
 sales_by_product.show(5)
+
+# Проверяем потери данных
+print("\n=== Data loss analysis for sales_by_product ===")
+print("Records in fact_sales with product_id not in dim_products:")
+fact_sales.join(dim_products, fact_sales.product_id == dim_products.product_id, 'left_anti').count()
+
+print("\nRecords in product_metrics with category_id not in category_info:")
+product_metrics.join(category_info, 'category_id', 'left_anti').count()
 
 # 2. Витрина продаж по клиентам
 print("\nProcessing sales_by_customer...")
@@ -285,6 +333,17 @@ product_quality = (
 print(f"product_quality count: {product_quality.count()}")
 print("Debug: product_quality sample...")
 product_quality.show(5)
+
+# Добавляем отладочную информацию о потерянных записях
+print("\n=== Debug: Lost records analysis ===")
+print("Records in fact_sales with store_id not in dim_stores:")
+fact_sales.join(dim_stores, fact_sales.store_id == dim_stores.store_id, 'left_anti').count()
+
+print("\nRecords in fact_sales with customer_id not in dim_customers:")
+fact_sales.join(dim_customers, fact_sales.customer_id == dim_customers.customer_id, 'left_anti').count()
+
+print("\nRecords in fact_sales with supplier_id not in dim_suppliers:")
+fact_sales.join(dim_suppliers, fact_sales.supplier_id == dim_suppliers.supplier_id, 'left_anti').count()
 
 # Записываем результаты в ClickHouse
 print("Writing data to ClickHouse...")
